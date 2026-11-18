@@ -17,12 +17,22 @@ import io
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 PULSE_MM = 0.2            # 每脉冲折合雨量（毫米）
 COUNTER_MOD = 10000       # 翻斗计数器量程（0~9999，回绕一次加 10000）
 INTERVALS_PER_HOUR = 60   # 每小时 60 个相邻分钟间隔
 MINUTE_SECONDS = 60
 HOUR_SECONDS = 3600
+
+# 流域面积权重：以百万分之一（ppm）整数存储，避免浮点求和误差。
+WEIGHT_SCALE = 1_000_000
+WEIGHT_MAX_DECIMALS = 6
+MIN_BASIN_STATIONS = 2
+MAX_BASIN_STATIONS = 8
+MAX_BASIN_NAME = 64
+MM_PER_PULSE = Decimal("0.2")
+CONTRIBUTION_QUANTUM = Decimal("0.01")
 
 DEVICE_PRIMARY = "primary"
 DEVICE_BACKUP = "backup"
@@ -223,6 +233,165 @@ def parse_csv_text(text: str):
             continue
         valid.append((row_no, raw, reading))
     return valid, errors
+
+
+def weight_to_ppm(text: str) -> int:
+    """把一个权重（文本）换算为 ppm 整数，要求 (0, 1] 且能精确表示到 6 位小数。
+
+    以 Decimal 解析，完全避免 0.1 + 0.2 这类二进制浮点误差；
+    只在换算后不是整数时才判为精度不足，因此 '0.5000000' 也可接受。
+    """
+    s = (text or "").strip()
+    if not s:
+        raise ValueError("权重不能为空")
+    if len(s) > 32:
+        raise ValueError(f"权重过长: {s!r}")
+    try:
+        value = Decimal(s)
+    except InvalidOperation:
+        raise ValueError(f"权重不是有效数字: {s!r}") from None
+    if not value.is_finite():
+        raise ValueError(f"权重必须是有限数字: {s!r}")
+    if value <= 0:
+        raise ValueError(f"权重必须大于 0: {s!r}")
+    if value > 1:
+        raise ValueError(f"权重不能大于 1（应为面积占比）: {s!r}")
+    ppm = value * WEIGHT_SCALE
+    if ppm != ppm.to_integral_value():
+        raise ValueError(
+            f"权重精度超出 {WEIGHT_MAX_DECIMALS} 位小数（且无法精确换算）: {s!r}"
+        )
+    return int(ppm)
+
+
+def format_weight(ppm: int) -> str:
+    """ppm 整数 -> 去掉末尾零的十进制权重文本（如 250000 -> '0.25'）。"""
+    digits = f"{ppm:0{WEIGHT_MAX_DECIMALS + 1}d}"   # 左侧补零到 7 位
+    whole, frac = digits[:-WEIGHT_MAX_DECIMALS], digits[-WEIGHT_MAX_DECIMALS:]
+    frac = frac.rstrip("0")
+    return f"{whole}.{frac}" if frac else whole
+
+
+class BasinConfigError(ValueError):
+    """流域配置校验失败（保存时整体拒绝，旧定义保持不变）。"""
+
+
+@dataclass(frozen=True)
+class BasinMember:
+    station: str
+    weight_ppm: int     # 面积权重，以百万分之一为单位（合计恒为 1_000_000）
+
+
+@dataclass(frozen=True)
+class BasinConfig:
+    name: str
+    members: tuple      # tuple[BasinMember, ...]，按保存顺序
+
+
+def parse_basin_config(name: str, members) -> BasinConfig:
+    """校验并规范化流域定义。
+
+    members: [(station, weight_text)]，允许 2~8 个站点，同一站点只能出现一次；
+    每个权重大于 0，且全部权重精确合计为 1（按 ppm 整数比较，无浮点误差）。
+    """
+    basin_name = (name or "").strip()
+    if not basin_name:
+        raise BasinConfigError("流域名称不能为空")
+    if len(basin_name) > MAX_BASIN_NAME:
+        raise BasinConfigError(f"流域名称超过 {MAX_BASIN_NAME} 字符")
+
+    raw = list(members)
+    if not MIN_BASIN_STATIONS <= len(raw) <= MAX_BASIN_STATIONS:
+        raise BasinConfigError(
+            f"流域需配置 {MIN_BASIN_STATIONS}~{MAX_BASIN_STATIONS} 个站点，"
+            f"当前 {len(raw)} 个"
+        )
+
+    parsed, seen = [], set()
+    for station_text, weight_text in raw:
+        station = (station_text or "").strip()
+        if not station:
+            raise BasinConfigError("站点名称不能为空")
+        if len(station) > 64:
+            raise BasinConfigError(f"站点名超过 64 字符: {station!r}")
+        if station in seen:
+            raise BasinConfigError(f"站点重复: {station!r}")
+        seen.add(station)
+        try:
+            ppm = weight_to_ppm(weight_text)
+        except ValueError as exc:
+            raise BasinConfigError(f"站点 {station!r} 的权重无效：{exc}") from None
+        parsed.append(BasinMember(station=station, weight_ppm=ppm))
+
+    total = sum(m.weight_ppm for m in parsed)
+    if total != WEIGHT_SCALE:
+        raise BasinConfigError(
+            f"各站权重合计必须为 1，当前为 {format_weight(total)}（相差 "
+            f"{format_weight(abs(WEIGHT_SCALE - total))}）"
+        )
+    return BasinConfig(name=basin_name, members=tuple(parsed))
+
+
+def _round_mm(value: Decimal) -> float:
+    return float(value.quantize(CONTRIBUTION_QUANTUM, rounding=ROUND_HALF_UP))
+
+
+def compute_basin_hour(basin: BasinConfig, member_hours: dict,
+                       hour_start_epoch: int | None = None) -> dict:
+    """由各成员站的小时结果计算流域面雨量。
+
+    member_hours: {station: compute_hour(...) 的返回值}。
+    规则：
+    - 任一成员站该小时不可供数（status != 'ok'），整个流域不可供数，
+      rainfall_mm 为 null，也不按其余站点重新分配权重；
+    - 全部成员站可供数时，各站贡献 = 站点雨量 × 面积权重，
+      流域雨量 = 各站贡献之和（贡献与合计同时按 0.01 mm 四舍五入，二者恒等）。
+    返回结构同时供网页与 API 使用。
+    """
+    members = []
+    unavailable = []
+    for member in basin.members:
+        result = member_hours.get(member.station) or {}
+        status = result.get("status", "missing")
+        available = status == "ok" and result.get("rainfall_mm") is not None
+        if available:
+            station_mm = Decimal(str(result["rainfall_mm"]))
+            exact = station_mm * Decimal(member.weight_ppm) / Decimal(WEIGHT_SCALE)
+            contribution = _round_mm(exact)
+        else:
+            station_mm = None
+            contribution = None
+            unavailable.append(member.station)
+        members.append({
+            "station": member.station,
+            "weight_ppm": member.weight_ppm,
+            "weight": member.weight_ppm / WEIGHT_SCALE,
+            "weight_text": format_weight(member.weight_ppm),
+            "status": status,
+            "available": available,
+            "station_rainfall_mm": float(station_mm) if station_mm is not None else None,
+            "contribution_mm": contribution,
+            "missing_intervals": result.get("missing_intervals"),
+            "source_counts": result.get("source_counts"),
+        })
+
+    complete = not unavailable
+    total = round(sum(m["contribution_mm"] for m in members), 2) if complete else None
+
+    out = {
+        "basin": basin.name,
+        "status": "ok" if complete else "incomplete",
+        # 供数字段：任一成员站不可供数即为 null，预警模型不得取用
+        "rainfall_mm": total if complete else None,
+        "unavailable_stations": unavailable,
+        "member_count": len(members),
+        "members": members,
+    }
+    if hour_start_epoch is not None:
+        out["hour_start"] = iso_utc(hour_start_epoch)
+    if not complete:
+        out["reason"] = "成员站不可供数: " + "、".join(unavailable)
+    return out
 
 
 def counter_delta(start: int, end: int) -> int:

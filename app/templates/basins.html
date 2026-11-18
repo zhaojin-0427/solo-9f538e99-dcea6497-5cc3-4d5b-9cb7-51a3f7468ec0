@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}流域面雨量配置{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>流域面雨量：配置与查询</h2>
+  <p class="muted">数据员保存流域及 2~8 个成员站的面积权重：每个权重必须大于 0，且全部权重合计为 1。
+    保存成功后立即按新定义供数；保存失败（含权重合计不为 1）会保留旧定义不变。</p>
+
+  {% if basins %}
+  <table>
+    <tr><th>流域</th><th>站点数</th><th>版本</th><th>最后保存 (UTC)</th><th>操作</th></tr>
+    {% for b in basins %}
+    <tr>
+      <td>{{ b.name }}</td><td>{{ b.version }}</td><td>{{ b.updated_at }}</td>
+      <td>
+        <a href="{{ url_for('basins_html', name=b.name) }}">编辑配置</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">尚未配置流域。</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>查询流域整点面雨量</h2>
+  <form method="get" action="{{ url_for('basin_hour_html') }}">
+    <label>流域 <input type="text" name="name" required></label>
+    <label>整点小时（UTC） <input type="datetime-local" name="hour" step="3600" required></label>
+    <button type="submit">查询</button>
+  </form>
+  <p class="muted">等效 API：<code>GET /api/basin_hourly?basin=流域&amp;hour=2026-11-17T10:00Z</code>
+    （与网页同一计算入口，结果一致）</p>
+</div>
+
+<div class="card">
+  <h2>{% if editing %}编辑流域配置：{{ form.name }}{% else %}新增 / 覆盖流域配置{% endif %}</h2>
+  <p class="muted">权重可填小数（最多 6 位），如 <code>0.25</code>、<code>0.375</code>。
+    同一流域再次保存会生成新版本并整体替换，旧版本保留可追溯。</p>
+  <form method="post" action="{{ url_for('save_basin_html') }}">
+    <p><label>流域名称
+      <input type="text" name="name" value="{{ form.name }}" maxlength="64"
+             required{% if editing %} readonly{% endif %}></label></p>
+    <table>
+      <tr><th>#</th><th>成员站点</th><th>面积权重</th></tr>
+      {% for row in form.rows %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td><input type="text" name="station" value="{{ row.station }}" maxlength="64"></td>
+        <td><input type="text" name="weight" value="{{ row.weight }}" inputmode="decimal"
+                   placeholder="如 0.4"></td>
+      </tr>
+      {% endfor %}
+      {% for i in range(form.rows|length + 1, max_members + 1) %}
+      <tr>
+        <td>{{ i }}</td>
+        <td><input type="text" name="station" maxlength="64"></td>
+        <td><input type="text" name="weight" inputmode="decimal" placeholder="如 0.2"></td>
+      </tr>
+      {% endfor %}
+    </table>
+    <p class="muted">当前 {{ form.rows|length }} 行；至少填 {{ min_members }} 行、最多 {{ max_members }} 行，
+      完全空白的行会被忽略。</p>
+    <button type="submit">保存流域配置</button>
+  </form>
+  {% if editing %}
+  <p><a href="{{ url_for('basins_html') }}">改为新增其他流域</a></p>
+  {% endif %}
+</div>
+{% endblock %}

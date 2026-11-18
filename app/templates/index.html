@@ -29,6 +29,33 @@
 </div>
 
 <div class="card">
+  <h2>流域面雨量</h2>
+  <form method="get" action="{{ url_for('basin_hour_html') }}">
+    <label>流域 <input type="text" name="name" {% if basins %}list="basin-names"{% endif %} required></label>
+    <label>整点小时（UTC） <input type="datetime-local" name="hour" step="3600" required></label>
+    <button type="submit">查询面雨量</button>
+  </form>
+  {% if basins %}
+  <datalist id="basin-names">
+    {% for b in basins %}<option value="{{ b.name }}">{% endfor %}
+  </datalist>
+  {% endif %}
+  <p class="muted">等效 API：<code>GET /api/basin_hourly?basin=流域&amp;hour=2026-11-17T10:00Z</code>；
+    配置入口：<a href="{{ url_for('basins_html') }}">流域配置</a>（2~8 个站，权重大于 0 且合计为 1）。</p>
+  {% if basins %}
+  <table>
+    <tr><th>已配置流域</th><th>站点数</th><th>版本</th><th>最后保存 (UTC)</th></tr>
+    {% for b in basins %}
+    <tr>
+      <td><a href="{{ url_for('basins_html', name=b.name) }}">{{ b.name }}</a></td>
+      <td>{{ b.member_count }}</td><td>{{ b.version }}</td><td>{{ b.updated_at }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+
+<div class="card">
   <h2>站点数据</h2>
   {% if stations %}
   <table>

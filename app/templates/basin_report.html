@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}流域面雨量 {{ r.basin }} {{ r.hour_start }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>流域面雨量：{{ r.basin }} @ {{ r.hour_start }}</h2>
+  {% if r.status == "ok" %}
+  <p>状态：<span class="badge ok">可供数</span>
+     面雨量 <strong>{{ "%.2f"|format(r.rainfall_mm) }} mm</strong>
+     （{{ r.member_count }} 站按面积权重加权，各站贡献见下表）</p>
+  {% else %}
+  <p>状态：<span class="badge bad">不可供数</span>
+     不可供数成员站：{{ r.unavailable_stations|join("、") }}</p>
+  <p class="muted">任一成员站该小时不可供数，流域即不可供数；不按其余站点重新分配权重。</p>
+  {% endif %}
+  <p class="muted">配置版本 {{ r.version }} ｜ 配置保存于 {{ r.config_updated_at }} ｜
+     配置与全部站点读数取自同一已提交状态</p>
+  <p>
+    <a href="{{ url_for('basin_hour_html', name=r.basin, hour=prev_hour) }}">← 前一小时</a> ｜
+    <a href="{{ url_for('basin_hour_html', name=r.basin, hour=next_hour) }}">后一小时 →</a> ｜
+    <a href="{{ url_for('basin_hourly_api', basin=r.basin, hour=r.hour_start) }}">JSON</a> ｜
+    <a href="{{ url_for('basins_html', name=r.basin) }}">编辑配置</a>
+  </p>
+</div>
+
+<div class="card">
+  <table>
+    <tr>
+      <th>成员站</th><th>面积权重</th><th>站雨量 (mm)</th>
+      <th>状态</th><th>贡献 (mm)</th><th>缺口间隔</th><th></th>
+    </tr>
+    {% for m in r.members %}
+    <tr class="{{ '' if m.available else 'missing' }}">
+      <td>{{ m.station }}</td>
+      <td>{{ m.weight_text }}</td>
+      <td>{{ "%.1f"|format(m.station_rainfall_mm) if m.station_rainfall_mm is not none else "—" }}</td>
+      <td>
+        {% if m.available %}<span class="badge ok">可供数</span>
+        {% else %}<span class="badge bad">不可供数</span>
+          {% if m.missing_intervals is not none %}（缺口 {{ m.missing_intervals }} / 60）{% endif %}
+        {% endif %}
+      </td>
+      <td>{{ "%.2f"|format(m.contribution_mm) if m.contribution_mm is not none else "—" }}</td>
+      <td>{{ m.missing_intervals if m.missing_intervals is not none else "—" }}</td>
+      <td><a href="{{ url_for('report_html', station=m.station, hour=r.hour_start) }}">站详情</a></td>
+    </tr>
+    {% endfor %}
+    <tr>
+      <th colspan="4">流域面雨量合计</th>
+      <th>{{ "%.2f"|format(r.rainfall_mm) if r.rainfall_mm is not none else "—" }}</th>
+      <th colspan="2"></th>
+    </tr>
+  </table>
+  <p class="muted">各站贡献 = 站雨量 × 面积权重（保留 2 位小数）；面雨量 = 各站贡献之和。</p>
+</div>
+{% endblock %}
