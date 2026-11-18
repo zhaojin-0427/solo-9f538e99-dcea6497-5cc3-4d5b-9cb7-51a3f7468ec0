@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}小时雨量 {{ r.station }} {{ r.hour_start }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>小时雨量：{{ r.station }} @ {{ r.hour_start }}</h2>
+  {% if r.status == "ok" %}
+  <p>状态：<span class="badge ok">可供数</span>
+     雨量 <strong>{{ "%.1f"|format(r.rainfall_mm) }} mm</strong>（共 {{ r.total_pulses }} 脉冲 × 0.2 mm）</p>
+  {% else %}
+  <p>状态：<span class="badge bad">不可供数</span>
+     缺口 {{ r.missing_intervals }} / 60 个间隔（已覆盖 {{ r.available_pulses }} 脉冲，仅供参考，不供数）</p>
+  {% endif %}
+  <p class="muted">间隔来源：主计 {{ r.source_counts.primary }} 段 ｜ 备计 {{ r.source_counts.backup }} 段 ｜ 缺失 {{ r.source_counts.missing }} 段</p>
+  <p>
+    <a href="{{ url_for('report_html', station=r.station, hour=prev_hour) }}">← 前一小时</a> ｜
+    <a href="{{ url_for('report_html', station=r.station, hour=next_hour) }}">后一小时 →</a> ｜
+    <a href="{{ url_for('hourly_api', station=r.station, hour=r.hour_start) }}">JSON</a>
+  </p>
+</div>
+
+<div class="card">
+  <table>
+    <tr><th>#</th><th>间隔 (UTC)</th><th>来源</th><th>脉冲</th><th>雨量 (mm)</th></tr>
+    {% for it in r.intervals %}
+    <tr class="{{ 'missing' if it.source == 'missing' else '' }}">
+      <td>{{ it.index + 1 }}</td>
+      <td>{{ it.start }} ~ {{ it.end }}</td>
+      <td>
+        {% if it.source == "primary" %}<span class="badge ok">主计</span>
+        {% elif it.source == "backup" %}<span class="badge warn">备计</span>
+        {% else %}<span class="badge bad">缺失</span>{% endif %}
+      </td>
+      <td>{{ it.pulses if it.pulses is not none else "—" }}</td>
+      <td>{{ "%.1f"|format(it.rainfall_mm) if it.rainfall_mm is not none else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

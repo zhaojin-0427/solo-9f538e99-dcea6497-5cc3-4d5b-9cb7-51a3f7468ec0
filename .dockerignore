@@ -1,0 +1,11 @@
+.git
+.gitignore
+.dockerignore
+tests/
+examples/
+__pycache__/
+*.pyc
+*.db
+*.db-wal
+*.db-shm
+README.md

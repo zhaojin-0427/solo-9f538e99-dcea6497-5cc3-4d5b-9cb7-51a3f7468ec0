@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}批次 #{{ report.batch_id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>批次 #{{ report.batch_id }} 已提交</h2>
+  <p>文件：{{ report.filename or "（粘贴文本）" }} ｜ 时间 (UTC)：{{ report.uploaded_at }}</p>
+  <p>总行数 {{ report.total_rows }} ｜
+     <span class="badge ok">接受 {{ report.accepted_count }}</span>
+     {% if report.rejected_count %}<span class="badge bad">拒绝 {{ report.rejected_count }}</span>
+     {% else %}<span class="badge ok">拒绝 0</span>{% endif %}</p>
+  <p class="muted">本批次全部已接受行与批次记录在同一事务中写入；写入失败会整体回滚，不会留下半批新结果。</p>
+</div>
+
+{% if report.rejected %}
+<div class="card">
+  <h2>被拒绝的行</h2>
+  <table>
+    <tr><th>行号</th><th>原因</th><th>原始内容</th></tr>
+    {% for r in report.rejected %}
+    <tr><td>{{ r.row_no }}</td><td>{{ r.reason }}</td><td><code>{{ r.raw }}</code></td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+{% if report.accepted %}
+<div class="card">
+  <h2>已接受的行{% if report.accepted_count > 100 %}（前 100 条）{% endif %}</h2>
+  <table>
+    <tr><th>行号</th><th>站点</th><th>设备</th><th>分钟 (UTC)</th><th>计数</th><th>修订号</th><th>动作</th></tr>
+    {% for a in report.accepted[:100] %}
+    <tr>
+      <td>{{ a.row_no }}</td><td>{{ a.reading.station }}</td>
+      <td>{{ "主计" if a.reading.device == "primary" else "备计" }}</td>
+      <td>{{ a.reading.minute_epoch|iso }}</td><td>{{ a.reading.counter }}</td>
+      <td>{{ a.reading.revision }}</td>
+      <td>{{ "新增" if a.action == "inserted" else "修订" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+<p><a href="{{ url_for('index') }}">返回首页</a></p>
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>上传 CSV</h2>
+  <form method="post" action="{{ url_for('upload_html') }}" enctype="multipart/form-data">
+    <p><input type="file" name="file" accept=".csv,text/csv"></p>
+    <p>或粘贴 CSV 文本：<br>
+      <textarea name="csv_text" rows="6" style="width:100%"
+        placeholder="station,device,minute,counter,revision"></textarea></p>
+    <button type="submit">上传</button>
+  </form>
+  <details>
+    <summary>CSV 格式说明</summary>
+    <p>列顺序：<code>站点, 主备标记, UTC整分钟, 计数(0~9999), 修订号</code>；表头可选（支持中英文列名），无表头时按此顺序解析。</p>
+    <p>时间示例：<code>2026-11-17T10:00:00Z</code>、<code>2026-11-17 10:00</code>（未带时区按 UTC 处理），秒必须为 00。</p>
+    <p>主备标记：<code>primary</code>/<code>backup</code>（或 <code>主</code>/<code>备</code>）。</p>
+    <p>同一（站点, 设备, 分钟）只接受更高修订号；格式错误的单行会被拒绝并在批次报告中列明，其余合法行在同一事务中入库。</p>
+  </details>
+</div>
+
+<div class="card">
+  <h2>查询小时雨量</h2>
+  <form method="get" action="{{ url_for('report_html') }}">
+    <label>站点 <input type="text" name="station" required></label>
+    <label>整点小时（UTC） <input type="datetime-local" name="hour" step="3600" required></label>
+    <button type="submit">查询</button>
+  </form>
+  <p class="muted">等效 API：<code>GET /api/hourly?station=站点&amp;hour=2026-11-17T10:00Z</code>（与网页同一计算入口，结果一致）</p>
+</div>
+
+<div class="card">
+  <h2>站点数据</h2>
+  {% if stations %}
+  <table>
+    <tr><th>站点</th><th>读数条数</th><th>最早分钟 (UTC)</th><th>最晚分钟 (UTC)</th></tr>
+    {% for s in stations %}
+    <tr>
+      <td>{{ s.station }}</td><td>{{ s.n }}</td>
+      <td>{{ s.first_minute|iso }}</td><td>{{ s.last_minute|iso }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">暂无数据。</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>最近上传批次</h2>
+  {% if batches %}
+  <table>
+    <tr><th>批次</th><th>时间 (UTC)</th><th>文件名</th><th>总行数</th><th>接受</th><th>拒绝</th><th></th></tr>
+    {% for b in batches %}
+    <tr>
+      <td>#{{ b.batch_id }}</td><td>{{ b.uploaded_at }}</td><td>{{ b.filename or "（粘贴文本）" }}</td>
+      <td>{{ b.total_rows }}</td><td>{{ b.accepted_rows }}</td><td>{{ b.rejected_rows }}</td>
+      <td><a href="{{ url_for('batch_detail', batch_id=b.batch_id) }}">明细</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">暂无批次。</p>{% endif %}
+</div>
+{% endblock %}

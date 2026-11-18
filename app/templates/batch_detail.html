@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}批次 #{{ batch.batch_id }} 明细{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>批次 #{{ batch.batch_id }} 明细</h2>
+  <p>文件：{{ batch.filename or "（粘贴文本）" }} ｜ 时间 (UTC)：{{ batch.uploaded_at }}</p>
+  <p>总行数 {{ batch.total_rows }} ｜
+     <span class="badge ok">接受 {{ batch.accepted_rows }}</span>
+     <span class="badge {{ 'bad' if batch.rejected_rows else 'ok' }}">拒绝 {{ batch.rejected_rows }}</span></p>
+</div>
+<div class="card">
+  <table>
+    <tr><th>行号</th><th>结果</th><th>说明</th><th>原始内容</th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.row_no }}</td>
+      <td>{% if r.outcome == "accepted" %}<span class="badge ok">接受</span>
+          {% else %}<span class="badge bad">拒绝</span>{% endif %}</td>
+      <td>{{ r.detail or "" }}</td>
+      <td><code>{{ r.raw }}</code></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+<p><a href="{{ url_for('index') }}">返回首页</a></p>
+{% endblock %}

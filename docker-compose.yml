@@ -1,0 +1,15 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      RAIN_DB: /data/rainfall.db
+      # 生产环境请替换为固定随机串（用于表单 flash 消息签名）
+      # SECRET_KEY: change-me
+    volumes:
+      - rainfall-data:/data
+    restart: unless-stopped
+
+volumes:
+  rainfall-data:
